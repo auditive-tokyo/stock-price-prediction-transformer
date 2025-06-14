@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+saved_model*/
+
+.env
+.venv
+
+.DS_Store
+
+# temp
+tradingbot/
