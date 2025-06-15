@@ -28,7 +28,7 @@ CHART_OUTPUT_DIR = "chart_images" # 追加
 # 取得する足種と期間の組み合わせ
 # (barSizeSetting, initial_durationStr_for_new_csv, file_suffix, chart_title_suffix)
 OHLC_CONFIGS = [
-    ("15 mins", "1 Y", "15min", "15分足"), # チャートタイトル用のサフィックスを追加
+    ("15 mins", "1 Y", "15M", "15分足"), # チャートタイトル用のサフィックスを追加
     ("4 hours", "5 Y", "4H", "4時間足"),   # チャートタイトル用のサフィックスを追加
     # ("1 day", "5 Y", "1D", "日足")
 ]

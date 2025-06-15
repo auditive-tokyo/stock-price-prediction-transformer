@@ -11,16 +11,17 @@ import pickle
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
+# このcofigで共通の値を設定してる
+from config import ROSOKU, CONTRACT_MONTH, USE_VOLUME, TIME_STEP
 
-# 設定 (このスクリプトの先頭あたりに追加)
-ROSOKU = "15M"
-# ROSOKU = "4H" # 4時間足を使用する場合はコメントアウトを外す
 
 # ===== データの読み込みと前処理 =====
 if ROSOKU == "15M":
-    file_path = f'/Volumes/AUDITIVE/GitHub/stock-price-prediction-transformer/chart_csvs/n225_ohlc_202509_15min.csv'
+    file_path = f'/Volumes/AUDITIVE/GitHub/stock-price-prediction-transformer/chart_csvs/n225_ohlc_{CONTRACT_MONTH}_{ROSOKU}.csv'
 elif ROSOKU == "4H":
-    file_path = f'/Volumes/AUDITIVE/GitHub/stock-price-prediction-transformer/chart_csvs/n225_ohlc_202509_4H.csv'
+    file_path = f'/Volumes/AUDITIVE/GitHub/stock-price-prediction-transformer/chart_csvs/n225_ohlc_{CONTRACT_MONTH}_{ROSOKU}.csv'
+# elif ROSOKU == "1D":
+    # file_path = f'/Volumes/AUDITIVE/GitHub/stock-price-prediction-transformer/chart_csvs/n225_ohlc_{CONTRACT_MONTH}_1D.csv'
 else:
     print(f"エラー: 未対応のROSOKU設定です: {ROSOKU}")
     exit()
@@ -29,34 +30,61 @@ print(f"Using data from: {file_path}")
 print(f"読み込んだデータ数: {len(df)}")
 
 # 'Date'列をdatetime型に変換し、ソート
-df['Date'] = pd.to_datetime(df['Date']) # '日付' から 'Date' に変更
-df = df.sort_values('Date') # '日付' から 'Date' に変更
+df['Date'] = pd.to_datetime(df['Date'])
+df = df.sort_values('Date')
 
-# Close列のみを使用
-data = df[['Close']].values  # '終値' から 'Close' に変更
+# --- 使用する特徴量を USE_VOLUME フラグに基づいて設定 ---
+if USE_VOLUME:
+    if 'Volume' in df.columns:
+        print("Volumeを含めて学習します。")
+        feature_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    else:
+        print("警告: 'Volume' 列が見つかりませんが、USE_VOLUMEがTrueです。OHLCのみを使用します。")
+        feature_columns = ['Open', 'High', 'Low', 'Close']
+else:
+    print("Volumeを含めずにOHLCのみで学習します。")
+    feature_columns = ['Open', 'High', 'Low', 'Close']
 
-# 'Close'用のスケーラー
+
+data = df[feature_columns].values
+
+# 特徴量スケーラー
 scaler = MinMaxScaler(feature_range=(0, 1))
 data_scaled = scaler.fit_transform(data)
 
+# 予測対象である終値（Close）のスケーリングを別途行うためのスケーラー
+# Close列が何番目の特徴量かを取得 (通常は3番目、0-indexed)
+close_idx = feature_columns.index('Close')
+scaler_close = MinMaxScaler(feature_range=(0,1))
+# data_scaledからClose列だけを取り出して、scaler_closeをfitする
+# 注意: ここでfit_transformするとdata_scaledの値が変わってしまうので、
+# df['Close']の元の値でfitするか、data_scaledの該当列でfitする。
+# ここでは、元のCloseデータでfitする。
+scaled_close_for_y = scaler_close.fit_transform(df[['Close']].values)
+
+
 # ===== 時系列データセット作成関数 =====
-def create_dataset(dataset, time_step=1):
+def create_dataset(dataset_x, dataset_y_target_scaled, time_step=1):
     """
     時系列データをモデル入力用に変換する関数
-    指定した時間ステップ数のシーケンスを作成し、次の値を予測対象とする
+    dataset_x: 入力特徴量 (スケーリング済み、複数特徴量)
+    dataset_y_target_scaled: 予測対象の終値 (スケーリング済み、1特徴量)
     """
     dataX, dataY = [], []
-    if len(dataset) <= time_step:
-        print(f"警告: データセットの長さ ({len(dataset)}) が time_step ({time_step}) 以下です。十分なデータがありません。")
+    if len(dataset_x) <= time_step:
+        print(f"警告: データセットの長さ ({len(dataset_x)}) が time_step ({time_step}) 以下です。")
         return np.array(dataX), np.array(dataY)
-    for i in range(len(dataset) - time_step - 1):
-        a = dataset[i:(i + time_step), 0]
+    # ループの範囲を修正: len(dataset_x) - time_step で十分
+    for i in range(len(dataset_x) - time_step):
+        # 入力シーケンス (全特徴量)
+        a = dataset_x[i:(i + time_step), :] # 全特徴量を使用
         dataX.append(a)
-        dataY.append(dataset[i + time_step, 0])
+        # 予測対象 (次の時間ステップのスケーリング済み終値)
+        dataY.append(dataset_y_target_scaled[i + time_step, 0])
     return np.array(dataX), np.array(dataY)
 
 # ===== パラメータ設定とデータ分割 =====
-time_step = 100  # 予測に使用する過去のデータポイント数 (データ量に応じて調整が必要)
+time_step = TIME_STEP
 
 # データを訓練用（80%）とテスト用（20%）に分割
 training_size = int(len(data_scaled) * 0.80)
@@ -64,25 +92,27 @@ test_size = len(data_scaled) - training_size
 
 if training_size <= time_step or test_size <= time_step:
     print(f"エラー: 訓練データサイズ ({training_size}) またはテストデータサイズ ({test_size}) が time_step ({time_step}) 以下です。")
-    print("データ量を増やすか、time_stepを小さくしてください。")
     exit()
 
-train_data, test_data = data_scaled[0:training_size,:], data_scaled[training_size:len(data_scaled),:]
+# 入力特徴量データ
+train_data_x, test_data_x = data_scaled[0:training_size,:], data_scaled[training_size:len(data_scaled),:]
+# 予測対象データ (スケーリング済み終値)
+train_data_y, test_data_y = scaled_close_for_y[0:training_size,:], scaled_close_for_y[training_size:len(scaled_close_for_y),:]
+
 
 # 訓練データとテストデータをモデル入力形式に変換
-X_train, y_train = create_dataset(train_data, time_step)
-X_test, y_test = create_dataset(test_data, time_step)
+X_train, y_train = create_dataset(train_data_x, train_data_y, time_step)
+X_test, y_test = create_dataset(test_data_x, test_data_y, time_step)
 
-# データセットが空でないか確認
+
 if X_train.size == 0 or X_test.size == 0:
-    print("エラー: 訓練データまたはテストデータが空です。create_datasetの処理結果を確認してください。")
-    print(f"訓練データ入力形状: {X_train.shape}, テストデータ入力形状: {X_test.shape}")
+    print("エラー: 訓練データまたはテストデータが空です。")
     exit()
 
 # ===== モデルのための入力データのリシェイプ =====
-# [サンプル数, 時間ステップ, 特徴量(1)]の形式にデータを整形
-X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
-X_test = X_test.reshape(X_test.shape[0], X_test.shape[1], 1)
+# X_train, X_test は既に create_dataset で正しい形状になっているはず
+# [サンプル数, 時間ステップ, 特徴量数]
+# 特徴量数は data_scaled.shape[1]
 
 # ===== Transformerエンコーダーブロックの定義 =====
 def transformer_encoder(inputs, head_size, num_heads, ff_dim, dropout=0):
@@ -151,20 +181,29 @@ np.save(history_save_path, history_dict)
 print(f"学習履歴を {history_save_path} に保存しました")
 
 # スケーラーも保存しておく（予測時に同じスケーリングを適用するため）
-scaler_save_path = os.path.join(save_dir, 'scaler_sakimono.pkl') # os.path.join を使用
-with open(scaler_save_path, 'wb') as f: 
+# scaler は全特徴量用、scaler_close は終値専用
+scaler_save_path = os.path.join(save_dir, 'scaler_ohlcv_sakimono.pkl') # 名前を変更
+with open(scaler_save_path, 'wb') as f:
     pickle.dump(scaler, f)
-print(f"スケーラーを {scaler_save_path} に保存しました")
+print(f"全特徴量スケーラーを {scaler_save_path} に保存しました")
+
+scaler_close_save_path = os.path.join(save_dir, 'scaler_close_sakimono.pkl')
+with open(scaler_close_save_path, 'wb') as f:
+    pickle.dump(scaler_close, f)
+print(f"終値専用スケーラーを {scaler_close_save_path} に保存しました")
+
 
 # ===== 予測の実行 =====
-train_predict = model.predict(X_train)
-test_predict = model.predict(X_test)
+train_predict_scaled = model.predict(X_train)
+test_predict_scaled = model.predict(X_test)
 
-# ===== 予測値をもとのスケールに戻す =====
-train_predict = scaler.inverse_transform(train_predict)
-test_predict = scaler.inverse_transform(test_predict)
-y_train_orig = scaler.inverse_transform(y_train.reshape(-1, 1))
-y_test_orig = scaler.inverse_transform(y_test.reshape(-1, 1))
+# ===== 予測値をもとのスケールに戻す (終値専用スケーラーを使用) =====
+train_predict = scaler_close.inverse_transform(train_predict_scaled)
+test_predict = scaler_close.inverse_transform(test_predict_scaled)
+
+# y_train, y_test は既にスケーリングされた終値なので、これらも逆変換する
+y_train_orig = scaler_close.inverse_transform(y_train.reshape(-1, 1))
+y_test_orig = scaler_close.inverse_transform(y_test.reshape(-1, 1))
 
 
 # ===== モデルの評価 =====

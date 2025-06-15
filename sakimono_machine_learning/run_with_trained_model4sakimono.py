@@ -8,14 +8,14 @@ import math
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 import pickle
-import os # osモジュールをインポート
+import os
+# このcofigで共通の値を設定してる
+from config import ROSOKU, CONTRACT_MONTH, USE_VOLUME, TIME_STEP
+
 
 # 設定
-DISPLAY_POINTS_PAST = 1000
-DAYS_TO_PREDICT = 2
-ROSOKU = "15M"
-# ROSOKU = "4H" # 4時間足を使用する場合はコメントアウトを外す
-CONTRACT_MONTH = "202509" # 契約月も変数化しておくと便利
+DISPLAY_POINTS_PAST = 3000
+DAYS_TO_PREDICT = 1
 
 # --- データの足種に応じた時間間隔設定を ROSOKU から動的に設定 ---
 if ROSOKU == "15M":
@@ -32,33 +32,36 @@ else:
 # ===== 保存済みのモデルとスケーラーを読み込む =====
 base_dir = os.path.dirname(__file__)
 model_save_path = os.path.join(base_dir, f'saved_model_sakimono_{ROSOKU}/stock_transformer_model_sakimono.keras')
-scaler_path = os.path.join(base_dir, f'saved_model_sakimono_{ROSOKU}/scaler_sakimono.pkl')
+# スケーラーのファイル名を訓練スクリプトと合わせる
+scaler_ohlcv_path = os.path.join(base_dir, f'saved_model_sakimono_{ROSOKU}/scaler_ohlcv_sakimono.pkl')
+scaler_close_path = os.path.join(base_dir, f'saved_model_sakimono_{ROSOKU}/scaler_close_sakimono.pkl')
 
 if not os.path.exists(model_save_path):
     print(f"エラー: モデルファイルが見つかりません: {model_save_path}")
     exit()
-if not os.path.exists(scaler_path):
-    print(f"エラー: スケーラーファイルが見つかりません: {scaler_path}")
+if not os.path.exists(scaler_ohlcv_path):
+    print(f"エラー: 全特徴量スケーラーファイルが見つかりません: {scaler_ohlcv_path}")
+    exit()
+if not os.path.exists(scaler_close_path):
+    print(f"エラー: 終値専用スケーラーファイルが見つかりません: {scaler_close_path}")
     exit()
 
 model = load_model(model_save_path)
 print(f"Model loaded from {model_save_path}")
 
-with open(scaler_path, 'rb') as f:
-    scaler = pickle.load(f)
-print(f"Scaler loaded from {scaler_path}")
+with open(scaler_ohlcv_path, 'rb') as f:
+    scaler_ohlcv = pickle.load(f) # 全特徴量スケーラー
+print(f"OHLCV Scaler loaded from {scaler_ohlcv_path}")
+with open(scaler_close_path, 'rb') as f:
+    scaler_close = pickle.load(f) # 終値専用スケーラー
+print(f"Close Scaler loaded from {scaler_close_path}")
 
 # ===== データの読み込みと前処理 =====
 # ROSOKU 変数に基づいてCSVファイルパスを動的に設定
 base_csv_dir = os.path.join(base_dir, '..', 'chart_csvs') # CSVファイルがあるディレクトリ
-csv_filename = ""
-if ROSOKU == "15M":
-    csv_filename = f'n225_ohlc_{CONTRACT_MONTH}_15min.csv'
-elif ROSOKU == "4H":
-    csv_filename = f'n225_ohlc_{CONTRACT_MONTH}_4H.csv'
-else:
-    print(f"エラー: 未対応のROSOKU設定です: {ROSOKU}。CSVファイルを特定できません。")
-    exit()
+
+csv_filename = f'n225_ohlc_{CONTRACT_MONTH}_{ROSOKU}.csv'
+
 csv_file_path = os.path.join(base_csv_dir, csv_filename)
 print(f"Using data from: {csv_file_path}")
 
@@ -67,84 +70,145 @@ if not os.path.exists(csv_file_path):
     print(f"エラー: CSVファイルが見つかりません: {csv_file_path}")
     exit()
 
-df = pd.read_csv(csv_file_path, encoding='utf-8') # エンコーディングを utf-8 に変更
+df = pd.read_csv(csv_file_path, encoding='utf-8')
 print(f"読み込んだデータ数: {len(df)}")
 
-# カラム名を英語の小文字に変更 (mplfinance との互換性のため、また元データに合わせて)
-# 元のCSVヘッダーが 'Date', 'Open', 'High', 'Low', 'Close', 'Volume' であることを想定
 df.rename(columns={
-    'Date': 'timestamp', # 'Date' を 'timestamp' に
-    'Open': 'open',      # 'Open' を 'open' に
-    'High': 'high',      # 'High' を 'high' に
-    'Low': 'low',        # 'Low' を 'low' に
-    'Close': 'close',    # 'Close' を 'close' に
-    'Volume': 'volume'   # 'Volume' を 'volume' に
+    'Date': 'timestamp', 'Open': 'open', 'High': 'high',
+    'Low': 'low', 'Close': 'close', 'Volume': 'volume'
 }, inplace=True)
-
-
-# timestamp列を日付型に変換
 df['timestamp'] = pd.to_datetime(df['timestamp'])
-df = df.sort_values('timestamp') # 念のためソート
+df = df.sort_values('timestamp')
 
-data = df[['close']].values  # close列のみを取得 (リネーム後のカラム名)
+# --- 使用する特徴量を USE_VOLUME フラグに基づいて設定 (訓練時と合わせる) ---
+if USE_VOLUME:
+    if 'volume' in df.columns:
+        feature_columns = ['open', 'high', 'low', 'close', 'volume']
+        print("Volumeを含むモデルの予測を実行します。")
+    else:
+        # Volumeありモデルを期待しているのにCSVにVolumeがない場合はエラーにするか、
+        # OHLCのみで実行するモデルを別途用意するなどの対応が必要。
+        # ここでは、訓練時と異なり、予測時はモデル構造が固定なのでエラーとするのが安全。
+        print("エラー: USE_VOLUMEがTrueですが、CSVに'volume'列がありません。")
+        print("Volumeありで学習されたモデルは、Volumeなしデータでは予測できません。")
+        exit()
+else:
+    feature_columns = ['open', 'high', 'low', 'close']
+    print("Volumeを含まないモデルの予測を実行します (OHLCのみ)。")
 
-# 保存済みスケーラーを使用してデータを正規化
-data_scaled = scaler.transform(data)
+print(f"予測に使用する特徴量: {feature_columns}")
 
-# ===== 時系列データセット作成関数 =====
-def create_dataset(dataset, time_step=1):
-    dataX, dataY = [], []
-    if len(dataset) <= time_step:
-        return np.array(dataX), np.array(dataY)
-    for i in range(len(dataset) - time_step - 1):
-        a = dataset[i:(i + time_step), 0]
-        dataX.append(a)
-        dataY.append(dataset[i + time_step, 0])
-    return np.array(dataX), np.array(dataY)
-
-# ===== パラメータ設定 =====
-# --- !!! 注意: time_step は訓練時と必ず同じ値にしてください !!! ---
-time_step = 100  # 訓練時と同じ値に設定 (training_model4sakimono.py の値と合わせる)
-
-X_all, y_all = create_dataset(data_scaled, time_step)
-
-if X_all.size == 0:
-    print("エラー: データセットからシーケンスを作成できませんでした。データ量とtime_stepを確認してください。")
+# 実際にVolume列が存在するか、かつfeature_columnsに含まれているか再確認
+if 'volume' in feature_columns and 'volume' not in df.columns:
+    # このケースは上のロジックでカバーされるはずだが念のため
+    print(f"エラー: 特徴量として 'volume' が指定されていますが、CSVファイルに 'volume' 列が見つかりません。")
     exit()
 
-X_all_reshaped = X_all.reshape(X_all.shape[0], X_all.shape[1], 1)
-print("データ準備完了。予測を開始します...")
+data_for_scaling = df[feature_columns].values
 
-all_predict_scaled = model.predict(X_all_reshaped, verbose=1)
-all_predict = scaler.inverse_transform(all_predict_scaled)
-y_all_actual = scaler.inverse_transform(y_all.reshape(-1, 1))
+# 保存済みスケーラー (scaler_ohlcv) を使用してデータを正規化
+# scaler_ohlcv は訓練時に使用した特徴量数でfitされている必要がある
+try:
+    data_scaled = scaler_ohlcv.transform(data_for_scaling)
+except ValueError as e:
+    print(f"エラー: スケーラーの適用に失敗しました。訓練時と特徴量数が異なる可能性があります。エラー詳細: {e}")
+    print(f"期待される特徴量数 (スケーラー): {scaler_ohlcv.n_features_in_}")
+    print(f"現在のデータの特徴量数: {data_for_scaling.shape[1]}")
+    exit()
 
-if len(y_all_actual) == len(all_predict):
-    overall_rmse = math.sqrt(mean_squared_error(y_all_actual, all_predict))
-    print(f"全データに対するRMSE: {overall_rmse}")
+
+# 終値のインデックスを取得 (予測対象の逆スケーリング用)
+close_idx = feature_columns.index('close') # これは 'close' があれば正しく動作
+
+
+# ===== 時系列データセット作成関数 (入力は全特徴量、出力はスケーリング済み終値) =====
+def create_sequences_for_prediction(input_data, time_step=1):
+    """
+    予測用の入力シーケンスのみを作成する (yは不要)
+    input_data: スケーリング済みの全特徴量データ
+    """
+    dataX = []
+    if len(input_data) < time_step: # 修正: time_step以上ないとシーケンス作れない
+        print(f"警告: データセットの長さ ({len(input_data)}) が time_step ({time_step}) 未満です。")
+        return np.array(dataX)
+    for i in range(len(input_data) - time_step + 1): # 修正: +1 して最後のシーケンスまで含める
+        a = input_data[i:(i + time_step), :] # 全特徴量
+        dataX.append(a)
+    return np.array(dataX)
+
+# ===== パラメータ設定 =====
+time_step = TIME_STEP  # 訓練時と同じ値
+
+# 全データから予測用シーケンスを作成 (Xのみ)
+X_all_sequences = create_sequences_for_prediction(data_scaled, time_step)
+
+if X_all_sequences.size == 0:
+    print("エラー: データセットからシーケンスを作成できませんでした。")
+    exit()
+
+# X_all_sequences は既に正しい形状 (サンプル数, time_step, 特徴量数) になっているはず
+print("データ準備完了。過去データに対する予測を開始します...")
+
+all_predict_scaled = model.predict(X_all_sequences, verbose=1) # 形状は (サンプル数, 1)
+# 予測結果 (スケーリング済み終値) を元のスケールに戻す (終値専用スケーラーを使用)
+all_predict = scaler_close.inverse_transform(all_predict_scaled)
+
+# 比較対象の実際の終値 (y_all_actual) を準備
+# create_dataset と同様のロジックで、スケーリング前のdfから実際の終値を取得し、
+# all_predict と同じ数だけ用意する
+actual_close_values_for_rmse = []
+for i in range(len(data_scaled) - time_step): # create_datasetのyの生成ロジックに合わせる
+    actual_close_values_for_rmse.append(df['close'].iloc[i + time_step])
+
+y_all_actual = np.array(actual_close_values_for_rmse)
+
+# all_predict は X_all_sequences の各シーケンスに対する予測なので、
+# y_all_actual の長さは len(X_all_sequences) と一致するはず
+# ただし、create_sequences_for_prediction のループ範囲を修正したので、
+# all_predict の長さは len(data_scaled) - time_step + 1 になる。
+# y_all_actual の長さは len(data_scaled) - time_step になる。
+# RMSE計算のためには長さを合わせる必要がある。
+# ここでは、all_predictの最後の予測は比較対象がないので、all_predictをスライスする
+if len(all_predict) == len(y_all_actual) + 1:
+    all_predict_for_rmse = all_predict[:-1] # 最後の予測を除外
+elif len(all_predict) == len(y_all_actual):
+    all_predict_for_rmse = all_predict
 else:
     print("RMSE計算のための実データと予測データの数が一致しません。")
+    all_predict_for_rmse = None # またはエラー処理
+
+if all_predict_for_rmse is not None and len(y_all_actual) == len(all_predict_for_rmse):
+    overall_rmse = math.sqrt(mean_squared_error(y_all_actual, all_predict_for_rmse))
+    print(f"全データに対するRMSE: {overall_rmse}")
+
 
 # ===== 結果のプロット準備 =====
-predictPlot = np.empty_like(data_scaled)
+# predictPlot は終値のプロットなので、all_predict (逆スケーリング済み終値) を使用
+predictPlot = np.empty((len(df), 1)) # dfの長さに合わせ、1列
 predictPlot[:, :] = np.nan
-if len(all_predict) > 0:
-    start_index_plot = time_step + 1
-    end_index_plot = start_index_plot + len(all_predict)
+if len(all_predict_for_rmse) > 0: # RMSE計算に使用した予測値でプロット
+    # プロット開始位置は、最初の予測がどのタイムスタンプに対応するか
+    # X_all_sequences[0] は df[0:time_step] から作られ、その予測は df[time_step] の終値
+    start_index_plot = time_step
+    end_index_plot = start_index_plot + len(all_predict_for_rmse)
     if end_index_plot <= len(predictPlot):
-         predictPlot[start_index_plot:end_index_plot, :] = all_predict
+         predictPlot[start_index_plot:end_index_plot, 0] = all_predict_for_rmse.flatten()
     else:
-        predictPlot[start_index_plot:, :] = all_predict[:len(predictPlot)-start_index_plot]
+        # このケースは通常発生しないはず
+        predictPlot[start_index_plot:, 0] = all_predict_for_rmse[:len(predictPlot)-start_index_plot].flatten()
+
 
 ohlc_df = df.set_index('timestamp')
 
-# ===== 未来の予測 ===== # コメントを少し変更
-print("Predicting future steps...") # メッセージを少し変更
-future_input_scaled = data_scaled[-time_step:].copy()
-future_predictions = []
+# ===== 未来の予測 =====
+print("Predicting future steps...")
+# 未来予測の最初の入力も全特徴量を使用
+future_input_scaled = data_scaled[-time_step:, :].copy() # 全特徴量
+future_predictions_scaled = [] # スケーリングされた予測値を保持
 future_dates = []
 last_date = df['timestamp'].iloc[-1]
-current_sequence = future_input_scaled.reshape(1, time_step, 1)
+# current_sequence の形状も (1, time_step, 特徴量数) にする
+current_sequence = future_input_scaled.reshape(1, time_step, data_scaled.shape[1])
 
 
 # 予測する日数
@@ -167,29 +231,33 @@ else: # 日足の場合
 
 print(f"Predicting {num_future_steps} steps ({time_delta_value} {time_delta_unit} interval, approx. {days_to_predict} days) into the future...")
 
-
 for i in range(num_future_steps):
-    future_pred_scaled_single = model.predict(current_sequence, verbose=0)
-    future_pred_actual_single = scaler.inverse_transform(future_pred_scaled_single)[0][0]
-    future_predictions.append(future_pred_actual_single)
-    
-    new_element_scaled = future_pred_scaled_single.flatten()
-    current_sequence_np = current_sequence.flatten()
-    current_sequence_np = np.append(current_sequence_np[1:], new_element_scaled)
-    current_sequence = current_sequence_np.reshape(1, time_step, 1)
+    future_pred_scaled_single = model.predict(current_sequence, verbose=0) # 出力は (1,1)
+    future_predictions_scaled.append(future_pred_scaled_single[0,0]) # スケーリングされた値を保存
 
-    # 日付を進める
+    # --- 暫定対応: 予測された終値で入力シーケンスの終値部分を更新し、他は最新値を維持 ---
+    new_ohlcv_scaled_row = current_sequence[0, -1, :].copy() # 最新の行をコピー
+    new_ohlcv_scaled_row[close_idx] = future_pred_scaled_single[0,0] # 終値部分を予測値で更新
+
+    # current_sequence の更新
+    new_sequence_rows = current_sequence[0, 1:, :]
+    current_sequence = np.vstack((new_sequence_rows, new_ohlcv_scaled_row.reshape(1, -1)))
+    current_sequence = current_sequence.reshape(1, time_step, data_scaled.shape[1])
+
+    # 日付を進める処理をここに追加
     if time_delta_unit == "minutes":
         next_date = last_date + pd.Timedelta(minutes=time_delta_value * (i + 1))
     elif time_delta_unit == "hours":
         next_date = last_date + pd.Timedelta(hours=time_delta_value * (i + 1))
-    elif time_delta_unit == "days":
-        next_date = last_date + pd.Timedelta(days=time_delta_value * (i + 1))
-    else: # デフォルトは日単位
-        next_date = last_date + pd.Timedelta(days=1 * (i + 1))
+    else: # フォールバック
+        next_date = last_date + pd.Timedelta(minutes=15 * (i + 1)) # デフォルトは15分
+
     future_dates.append(next_date)
 
-future_df = pd.DataFrame({'price': future_predictions}, index=future_dates)
+# スケーリングされた未来予測をまとめて元のスケールに戻す (終値専用スケーラー)
+future_predictions_actual = scaler_close.inverse_transform(np.array(future_predictions_scaled).reshape(-1,1)).flatten()
+
+future_df = pd.DataFrame({'price': future_predictions_actual}, index=future_dates)
 # 出力するCSVファイル名に ROSOKU を含める
 future_csv_filename = f'future_predictions_sakimono_{ROSOKU}.csv'
 future_csv_path = os.path.join(base_dir, future_csv_filename) # 保存先もスクリプト基準に
@@ -197,7 +265,7 @@ future_df.to_csv(future_csv_path, index_label='timestamp')
 print(f"未来予測データをCSVに保存しました: {future_csv_path}")
 
 # ===== プロット用のデータ拡張 =====
-for date_val, price_val in zip(future_dates, future_predictions):
+for date_val, price_val in zip(future_dates, future_predictions_actual):
     new_row = pd.DataFrame({
         'open': price_val, 'high': price_val, 'low': price_val, 'close': price_val, 'volume': 0
     }, index=[date_val])
@@ -208,12 +276,12 @@ print("Drawing candlestick chart...")
 display_points_past = DISPLAY_POINTS_PAST
 ohlc_df_subset = ohlc_df.iloc[-(display_points_past + 10):].copy()
 
-actual_pred_dates = df['timestamp'].iloc[time_step+1 : time_step+1+len(all_predict)]
-actual_pred_series = pd.Series(all_predict.flatten(), index=actual_pred_dates)
+actual_pred_dates = df['timestamp'].iloc[time_step : time_step+len(all_predict_for_rmse)]
+actual_pred_series = pd.Series(all_predict_for_rmse.flatten(), index=actual_pred_dates)
 plot_pred_series = ohlc_df_subset.index.map(lambda x: actual_pred_series.get(x, np.nan))
 plot_pred_series = pd.Series(plot_pred_series, index=ohlc_df_subset.index)
 
-future_series_for_plot = pd.Series(future_predictions, index=future_dates)
+future_series_for_plot = pd.Series(future_predictions_actual, index=future_dates)
 plot_future_series = ohlc_df_subset.index.map(lambda x: future_series_for_plot.get(x, np.nan))
 plot_future_series = pd.Series(plot_future_series, index=ohlc_df_subset.index)
 
