@@ -20,8 +20,6 @@ if ROSOKU == "15M":
     file_path = f'/Volumes/AUDITIVE/GitHub/stock-price-prediction-transformer/chart_csvs/n225_ohlc_{CONTRACT_MONTH}_{ROSOKU}.csv'
 elif ROSOKU == "4H":
     file_path = f'/Volumes/AUDITIVE/GitHub/stock-price-prediction-transformer/chart_csvs/n225_ohlc_{CONTRACT_MONTH}_{ROSOKU}.csv'
-# elif ROSOKU == "1D":
-    # file_path = f'/Volumes/AUDITIVE/GitHub/stock-price-prediction-transformer/chart_csvs/n225_ohlc_{CONTRACT_MONTH}_1D.csv'
 else:
     print(f"エラー: 未対応のROSOKU設定です: {ROSOKU}")
     exit()
@@ -139,8 +137,8 @@ def transformer_encoder(inputs, head_size, num_heads, ff_dim, dropout=0):
 # ===== モデル構築 =====
 inputs = Input(shape=(X_train.shape[1], X_train.shape[2])) 
 # --- !!! 注意: データ量が少ない場合、モデルの複雑さ（層の数、ユニット数）を減らすことを検討してください !!! ---
-x = transformer_encoder(inputs, head_size=64, num_heads=2, ff_dim=64, dropout=0.1) # パラメータ調整例
-x = transformer_encoder(x, head_size=64, num_heads=2, ff_dim=64, dropout=0.15) # パラメータ調整例
+x = transformer_encoder(inputs, head_size=32, num_heads=2, ff_dim=64, dropout=0.1) # パラメータ調整例
+x = transformer_encoder(x, head_size=32, num_heads=2, ff_dim=64, dropout=0.15) # パラメータ調整例
 
 x = GlobalAveragePooling1D(data_format='channels_last')(x)
 x = Dropout(0.15)(x) 
