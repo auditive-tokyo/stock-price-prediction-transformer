@@ -146,7 +146,7 @@ x = Dense(10, activation="relu", kernel_regularizer=l2(1e-4))(x) # パラメー�
 outputs = Dense(1, activation="linear", kernel_regularizer=l2(1e-4))(x) 
 
 model = Model(inputs=inputs, outputs=outputs)
-optimizer = Adam(learning_rate=0.001) # 学習率調整例
+optimizer = Adam(learning_rate=0.00001) # 学習率調整例
 model.compile(optimizer=optimizer, loss="mean_squared_error")
 
 model.summary()

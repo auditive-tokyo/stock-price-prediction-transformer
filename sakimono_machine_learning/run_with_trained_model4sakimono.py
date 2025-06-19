@@ -14,8 +14,8 @@ from config import ROSOKU, CONTRACT_MONTH, USE_VOLUME, TIME_STEP
 
 
 # 設定
-DISPLAY_POINTS_PAST = 3000
-DAYS_TO_PREDICT = 1
+DISPLAY_POINTS_PAST = 1000
+DAYS_TO_PREDICT = 0.33
 
 # --- データの足種に応じた時間間隔設定を ROSOKU から動的に設定 ---
 if ROSOKU == "15M":
@@ -219,19 +219,24 @@ if time_delta_unit == "minutes":
     steps_per_hour = 60 // time_delta_value
     # 1日あたりのステップ数
     steps_per_day = 24 * steps_per_hour
-    num_future_steps = steps_per_day * days_to_predict
+    num_future_steps = steps_per_day * days_to_predict # ここではまだfloatの可能性
 elif time_delta_unit == "hours":
     # 1日あたりのステップ数
     steps_per_day = 24 // time_delta_value
-    if steps_per_day == 0: steps_per_day = 1 # 時間足が24時間より大きい場合は1日1ステップとみなす（ありえないが念のため）
-    num_future_steps = steps_per_day * days_to_predict
-    if num_future_steps == 0 : num_future_steps = 1 # 少なくとも1ステップは予測
+    if steps_per_day == 0: steps_per_day = 1
+    num_future_steps = steps_per_day * days_to_predict # ここではまだfloatの可能性
+    if num_future_steps == 0 : num_future_steps = 1
 else: # 日足の場合
-    num_future_steps = days_to_predict # 日足なら日数そのままがステップ数
+    num_future_steps = days_to_predict # ここではまだfloatの可能性
+
+# --- ここで整数に変換 ---
+num_future_steps = int(num_future_steps)
+if num_future_steps < 1: # 念のため、最低1ステップは予測するように
+    num_future_steps = 1
 
 print(f"Predicting {num_future_steps} steps ({time_delta_value} {time_delta_unit} interval, approx. {days_to_predict} days) into the future...")
 
-for i in range(num_future_steps):
+for i in range(num_future_steps): # ここで整数が渡されるようにする
     future_pred_scaled_single = model.predict(current_sequence, verbose=0) # 出力は (1,1)
     future_predictions_scaled.append(future_pred_scaled_single[0,0]) # スケーリングされた値を保存
 

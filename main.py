@@ -73,16 +73,17 @@ def main():
     print(f"\nStep 3: The active N225 contract month to be used is: {active_contract_month}")
 
 
-    # --- 4. Update or Create OHLC CSV and then Create Chart for each configuration ---
+    # --- 4. Update or Create OHLC CSVs for each configuration ---
+    print("\n--- Step 4: Updating/Creating OHLC CSVs ---")
     ohlc_client_id_counter = 0
-    for bar_size, initial_duration, suffix, chart_title_suffix in OHLC_CONFIGS: # chart_title_suffix を追加
+    for bar_size, initial_duration, suffix, chart_title_suffix in OHLC_CONFIGS:
         current_ohlc_client_id = CLIENT_ID_OHLC_DATA_BASE + ohlc_client_id_counter
         
         csv_filename_only = f"n225_ohlc_{active_contract_month}_{suffix}.csv"
         csv_output_file = os.path.join(CSV_OUTPUT_DIR, csv_filename_only)
 
-        print(f"\nStep 4a: Updating/Creating OHLC CSV for contract {active_contract_month}, Bar: {bar_size} (Initial Duration: {initial_duration}) (clientId: {current_ohlc_client_id})...")
-        print(f"Output CSV file will be: {csv_output_file}")
+        print(f"\nProcessing CSV for contract {active_contract_month}, Bar: {bar_size} (Initial Duration: {initial_duration}) (clientId: {current_ohlc_client_id})...")
+        print(f"Target CSV file: {csv_output_file}")
         
         csv_updated_successfully = update_or_create_ohlc_csv(
             base_contract_for_ohlc=N225_FUTURES_CONTRACT,
@@ -97,48 +98,26 @@ def main():
 
         if csv_updated_successfully:
             print(f"Successfully updated/created CSV: {csv_output_file}")
+        else:
+            print(f"Failed to update/create CSV: {csv_output_file}")
+        
+        ohlc_client_id_counter += 1
+        print("Waiting for 5 seconds before next IB API operation...")
+        time.sleep(5)
+    
+    # --- 5. Create Charts from CSVs for each configuration ---
+    print("\n--- Step 5: Creating Charts from CSVs ---")
+    for bar_size, initial_duration, suffix, chart_title_suffix in OHLC_CONFIGS:
+        csv_filename_only = f"n225_ohlc_{active_contract_month}_{suffix}.csv"
+        csv_output_file = os.path.join(CSV_OUTPUT_DIR, csv_filename_only)
 
-            # --- 4b. Create Chart from the CSV ---
-            print(f"\nStep 4b: Creating chart for {csv_output_file}...")
-            chart_filename_only = f"n225_chart_{active_contract_month}_{suffix}.jpg" # チャートファイル名
-            chart_output_file = os.path.join(CHART_OUTPUT_DIR, chart_filename_only) # チャート出力パス
-            chart_title = f"日経225先物 {active_contract_month} ({chart_title_suffix})" # チャートタイトル
+        if os.path.exists(csv_output_file):
+            print(f"\nCreating chart for {csv_output_file}...")
+            chart_filename_only = f"n225_chart_{active_contract_month}_{suffix}.jpg"
+            chart_output_file = os.path.join(CHART_OUTPUT_DIR, chart_filename_only)
+            chart_title = f"日経225先物 {active_contract_month} ({chart_title_suffix})"
 
             try:
-                # create_chart 関数は Shift-JIS を期待しているが、update_ohlc_data は UTF-8 で保存している可能性があるため注意
-                # create_rosoku.py 側でCSV読み込みエンコーディングをUTF-8に変更するか、
-                # update_ohlc_data.py 側でShift-JISで保存する必要があるかもしれません。
-                # ここでは create_rosoku.py が Shift-JIS を読む前提で進めます。
-                # もし update_ohlc_data.py が UTF-8 で保存している場合、
-                # create_rosoku.py の pd.read_csv(csv_file, encoding='shift-jis') を
-                # pd.read_csv(csv_file, encoding='utf-8') に変更する必要があります。
-                # IBKRからのデータは通常UTF-8なので、UTF-8で統一するのが望ましいです。
-
-                # 現在の create_rosoku.py は '日付', '始値' などの日本語カラム名を期待しています。
-                # update_ohlc_data.py が出力するCSVのヘッダーは 'Date', 'Open', 'High', 'Low', 'Close', 'Volume' です。
-                # このため、create_rosoku.py 側でカラム名マッピングを修正するか、
-                # ここで一時的にカラム名を変更したDataFrameを渡す必要があります。
-                # 簡単なのは create_rosoku.py 側を 'Date', 'Open' などに合わせることです。
-                # ここでは、まず create_rosoku.py が期待する日本語カラム名に合わせるため、
-                # 一時的にCSVを読み込んでカラム名を変換する処理は含めず、
-                # create_rosoku.py 側での対応を促します。
-
-                # create_rosoku.py の pd.read_csv(csv_file, encoding='shift-jis') と
-                # df.rename(columns={'日付': 'Date', ...}) の整合性を確認してください。
-                # update_ohlc_data.py は 'Date', 'Open', ... でCSVを出力します。
-                # create_rosoku.py は '日付', '始値', ... を期待し、'Date', 'Open', ... にリネームしています。
-                # このため、create_rosoku.py の最初の読み込み時のカラム名と、
-                # pd.to_datetime(df['日付']) の部分を 'Date' に合わせる必要があります。
-
-                # --- create_rosoku.py 側の修正推奨 ---
-                # 1. pd.read_csv(csv_file, encoding='utf-8') に変更
-                # 2. df['Date'] = pd.to_datetime(df['Date']) に変更 (元の日付列名が 'Date' の場合)
-                # 3. df = df.set_index('Date') に変更
-                # 4. df = df.rename(columns={...}) の部分は不要になるか、
-                #    もし '始値' などで処理している部分があれば、そこを 'Open' などに合わせる。
-                #    現状の mplfinance は 'Open', 'High', 'Low', 'Close', 'Volume' を期待するので、
-                #    CSVのヘッダーがこれであればリネームは不要。
-
                 chart_image_path = create_chart(
                     csv_file=csv_output_file,
                     output_file=chart_output_file,
@@ -148,11 +127,7 @@ def main():
             except Exception as e:
                 print(f"Error creating chart for {csv_output_file}: {e}")
         else:
-            print(f"Skipping chart creation for {csv_output_file} due to CSV update/creation failure.")
-        
-        ohlc_client_id_counter += 1
-        print("Waiting for 5 seconds before next operation...") # 待機時間を調整
-        time.sleep(5) 
+            print(f"Skipping chart creation for {csv_output_file} as it does not exist.")
 
     print("\n--- Main Script Finished ---")
 

@@ -192,7 +192,7 @@ def update_or_create_ohlc_csv(
     for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
         if col in combined_df.columns:
             combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce')
-    combined_df = combined_df.dropna(subset=['Open', 'High', 'Low', 'Close']) # OHLCがNaNの行は不適切なので削除
+    combined_df = combined_df.dropna(subset=['Open', 'High', 'Low', 'Close'])
 
     # Date_dt列で重複を削除し、最新のデータを保持
     combined_df = combined_df.drop_duplicates(subset=['Date_dt'], keep='last')
