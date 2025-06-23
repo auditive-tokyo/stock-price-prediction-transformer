@@ -27,6 +27,7 @@ def get_and_summarize_top_articles(top_n: int = 5) -> Optional[List[str]]:
     # 2. OpenAIでヘッドラインをランク付け
     print("Ranking headlines with OpenAI...")
     ranked_headlines = rank_headlines_with_openai(news_headlines)
+    print(f"Ranked Headlines: {ranked_headlines}")
     if not ranked_headlines:
         print("Could not rank headlines.")
         return None
