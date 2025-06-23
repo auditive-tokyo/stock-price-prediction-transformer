@@ -211,10 +211,11 @@ if __name__ == '__main__':
     
     # N225先物の直近限月などを指定 (YYYYMM形式)
     # 実際の取引可能な限月に合わせてください
-    target_expiration = "202509" 
+    target_expiration = "202509"
+    PORT = 4001 # 本番用ポート
     
     # clientIdは他のAPIクライアントと重複しないように
-    quote_result = get_delayed_n225_futures_quote(target_expiration, clientId=106)
+    quote_result = get_delayed_n225_futures_quote(target_expiration, port=PORT, clientId=106)
 
     # if quote_result:
     #     # ここで取得したデータを使って何か処理
