@@ -14,8 +14,8 @@ from config import ROSOKU, CONTRACT_MONTH, USE_VOLUME, TIME_STEP
 
 
 # 設定
-DISPLAY_POINTS_PAST = 1000
-DAYS_TO_PREDICT = 0.05
+DISPLAY_POINTS_PAST = 3000
+DAYS_TO_PREDICT = 0.25
 
 # --- データの足種に応じた時間間隔設定を ROSOKU から動的に設定 ---
 if ROSOKU == "15M":
@@ -80,34 +80,14 @@ df.rename(columns={
 df['timestamp'] = pd.to_datetime(df['timestamp'])
 df = df.sort_values('timestamp')
 
-# --- 使用する特徴量を USE_VOLUME フラグに基づいて設定 (訓練時と合わせる) ---
-if USE_VOLUME:
-    if 'volume' in df.columns:
-        feature_columns = ['open', 'high', 'low', 'close', 'volume']
-        print("Volumeを含むモデルの予測を実行します。")
-    else:
-        # Volumeありモデルを期待しているのにCSVにVolumeがない場合はエラーにするか、
-        # OHLCのみで実行するモデルを別途用意するなどの対応が必要。
-        # ここでは、訓練時と異なり、予測時はモデル構造が固定なのでエラーとするのが安全。
-        print("エラー: USE_VOLUMEがTrueですが、CSVに'volume'列がありません。")
-        print("Volumeありで学習されたモデルは、Volumeなしデータでは予測できません。")
-        exit()
-else:
-    feature_columns = ['open', 'high', 'low', 'close']
-    print("Volumeを含まないモデルの予測を実行します (OHLCのみ)。")
-
+# --- 使用する特徴量を「close」のみに固定 ---
+feature_columns = ['close']
+print("Closeのみで予測を実行します。")
 print(f"予測に使用する特徴量: {feature_columns}")
-
-# 実際にVolume列が存在するか、かつfeature_columnsに含まれているか再確認
-if 'volume' in feature_columns and 'volume' not in df.columns:
-    # このケースは上のロジックでカバーされるはずだが念のため
-    print(f"エラー: 特徴量として 'volume' が指定されていますが、CSVファイルに 'volume' 列が見つかりません。")
-    exit()
 
 data_for_scaling = df[feature_columns].values
 
 # 保存済みスケーラー (scaler_ohlcv) を使用してデータを正規化
-# scaler_ohlcv は訓練時に使用した特徴量数でfitされている必要がある
 try:
     data_scaled = scaler_ohlcv.transform(data_for_scaling)
 except ValueError as e:
@@ -116,9 +96,7 @@ except ValueError as e:
     print(f"現在のデータの特徴量数: {data_for_scaling.shape[1]}")
     exit()
 
-
-# 終値のインデックスを取得 (予測対象の逆スケーリング用)
-close_idx = feature_columns.index('close') # これは 'close' があれば正しく動作
+close_idx = 0  # feature_columnsが['close']なのでインデックスは0
 
 
 # ===== 時系列データセット作成関数 (入力は全特徴量、出力はスケーリング済み終値) =====
@@ -257,9 +235,22 @@ print(f"未来予測データをCSVに保存しました: {future_csv_path}")
 last_real_close = df['close'].iloc[-1]
 last_real_timestamp = df['timestamp'].iloc[-1]
 
-# 予測リストの先頭に最後の実データを追加して、チャートの線を滑らかに接続
-anchored_predictions = [last_real_close] + future_predictions_actual.tolist()
-anchored_dates = [last_real_timestamp] + future_dates
+# --- ここから修正 ---
+# 青線（過去データ予測）の最後の値とタイムスタンプを取得
+if all_predict_for_rmse is not None and len(all_predict_for_rmse) > 0:
+    last_pred_close = all_predict_for_rmse[-1]
+    last_pred_timestamp = df['timestamp'].iloc[time_step + len(all_predict_for_rmse) - 1]
+else:
+    last_pred_close = last_real_close
+    last_pred_timestamp = last_real_timestamp
+
+# 予測リストの先頭に「青線の最後の予測値」を追加して、チャートの線を滑らかに接続
+# last_pred_closeが配列の場合はfloatに変換
+if isinstance(last_pred_close, (np.ndarray, list)):
+    last_pred_close = float(np.array(last_pred_close).flatten()[0])
+anchored_predictions = [last_pred_close] + list(np.array(future_predictions_actual).flatten())
+anchored_dates = [last_pred_timestamp] + future_dates
+# --- ここまで修正 ---
 
 # ===== プロット用のデータ拡張 =====
 # 注意: ここでのデータ拡張はチャート表示用であり、CSV保存される予測値とは異なります
@@ -287,13 +278,14 @@ ohlc_df_subset = ohlc_df.iloc[-(display_points_past + len(anchored_predictions) 
 predictPlot = np.empty((len(df), 1))
 predictPlot[:, :] = np.nan
 if all_predict_for_rmse is not None and len(all_predict_for_rmse) > 0:
+    # flattenして1次元に
+    all_predict_for_rmse_flat = np.array(all_predict_for_rmse).flatten()
     start_index_plot = time_step
-    end_index_plot = start_index_plot + len(all_predict_for_rmse)
+    end_index_plot = start_index_plot + len(all_predict_for_rmse_flat)
     if end_index_plot <= len(predictPlot):
-         predictPlot[start_index_plot:end_index_plot, 0] = all_predict_for_rmse.flatten()
+         predictPlot[start_index_plot:end_index_plot, 0] = all_predict_for_rmse_flat
     else:
-        predictPlot[start_index_plot:, 0] = all_predict_for_rmse[:len(predictPlot)-start_index_plot].flatten()
-
+        predictPlot[start_index_plot:, 0] = all_predict_for_rmse_flat[:len(predictPlot)-start_index_plot]
 # プロット用のSeriesに変換
 historical_pred_series = pd.Series(predictPlot.flatten(), index=df['timestamp'])
 plot_historical_pred_series = ohlc_df_subset.index.map(lambda x: historical_pred_series.get(x, np.nan))

@@ -31,18 +31,9 @@ print(f"読み込んだデータ数: {len(df)}")
 df['Date'] = pd.to_datetime(df['Date'])
 df = df.sort_values('Date')
 
-# --- 使用する特徴量を USE_VOLUME フラグに基づいて設定 ---
-if USE_VOLUME:
-    if 'Volume' in df.columns:
-        print("Volumeを含めて学習します。")
-        feature_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-    else:
-        print("警告: 'Volume' 列が見つかりませんが、USE_VOLUMEがTrueです。OHLCのみを使用します。")
-        feature_columns = ['Open', 'High', 'Low', 'Close']
-else:
-    print("Volumeを含めずにOHLCのみで学習します。")
-    feature_columns = ['Open', 'High', 'Low', 'Close']
-
+# --- Closeのみを特徴量に設定 ---
+print("Closeのみで学習します。")
+feature_columns = ['Close']
 
 data = df[feature_columns].values
 
@@ -50,14 +41,8 @@ data = df[feature_columns].values
 scaler = MinMaxScaler(feature_range=(0, 1))
 data_scaled = scaler.fit_transform(data)
 
-# 予測対象である終値（Close）のスケーリングを別途行うためのスケーラー
-# Close列が何番目の特徴量かを取得 (通常は3番目、0-indexed)
-close_idx = feature_columns.index('Close')
+# Close列のみなので、scaler_closeも同じデータでfit
 scaler_close = MinMaxScaler(feature_range=(0,1))
-# data_scaledからClose列だけを取り出して、scaler_closeをfitする
-# 注意: ここでfit_transformするとdata_scaledの値が変わってしまうので、
-# df['Close']の元の値でfitするか、data_scaledの該当列でfitする。
-# ここでは、元のCloseデータでfitする。
 scaled_close_for_y = scaler_close.fit_transform(df[['Close']].values)
 
 
@@ -72,12 +57,9 @@ def create_dataset(dataset_x, dataset_y_target_scaled, time_step=1):
     if len(dataset_x) <= time_step:
         print(f"警告: データセットの長さ ({len(dataset_x)}) が time_step ({time_step}) 以下です。")
         return np.array(dataX), np.array(dataY)
-    # ループの範囲を修正: len(dataset_x) - time_step で十分
     for i in range(len(dataset_x) - time_step):
-        # 入力シーケンス (全特徴量)
-        a = dataset_x[i:(i + time_step), :] # 全特徴量を使用
+        a = dataset_x[i:(i + time_step), :] # 全特徴量を使用（今回はCloseのみ）
         dataX.append(a)
-        # 予測対象 (次の時間ステップのスケーリング済み終値)
         dataY.append(dataset_y_target_scaled[i + time_step, 0])
     return np.array(dataX), np.array(dataY)
 
