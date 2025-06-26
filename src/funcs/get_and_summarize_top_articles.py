@@ -59,7 +59,7 @@ def get_and_summarize_top_articles(top_n: int = 5) -> Optional[List[str]]:
 
         if i < top_n:
             print("Waiting for 1 second...")
-            time.sleep(1)
+            time.sleep(2)
         
     if not summaries_list:
         print("Failed to generate any summaries.")
