@@ -161,13 +161,3 @@ def get_board_info():
 
 if __name__ == "__main__":
     board = get_board_info()
-
-    # Markdownテーブルを文字列として作成
-    md_table = "| 売気配 | 値段 | 買気配 |\n|-------|------|-------|\n"
-    for item in board:
-        sell = item["sell_qty"] if item["sell_qty"] is not None else ""
-        price = item["price"] if item["price"] is not None else ""
-        buy = item["buy_qty"] if item["buy_qty"] is not None else ""
-        md_table += f"| {sell} | {price} | {buy} |\n"
-
-    print(md_table)

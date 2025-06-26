@@ -5,11 +5,15 @@ from ibapi.contract import Contract
 from src.utils.ib_futures_expirations import get_n225_futures_expirations
 from src.utils.active_contract_month import determine_active_contract_month
 from src.utils.get_last_close_from_csv import get_last_close_from_csv
+from src.utils.print_positions_vs_latest_close import print_positions_vs_latest_close
 from src.funcs.get_positions import get_current_positions
 from src.funcs.update_ohlc_data import update_or_create_ohlc_csv
 from src.funcs.create_rosoku import create_chart
 from src.funcs.get_and_summarize_top_articles import get_and_summarize_top_articles
+from src.funcs.openai_prediction import analyze_chart_with_function_calling
+from src.funcs.openai_transaction import analyze_close_decision_with_function_calling
 from src.funcs.show_margin import get_account_updates
+from src.funcs.get_board_info import get_board_info_markdown
 
 # --- Global Settings ---
 HOST = "127.0.0.1"
@@ -17,11 +21,14 @@ PORT = 7497
 # PORT = 4001 # 本番
 
 N225_FUTURES_CONTRACT = Contract()
-N225_FUTURES_CONTRACT.symbol = "N225M"
+N225_FUTURES_CONTRACT.symbol = "N225"
 N225_FUTURES_CONTRACT.secType = "FUT"
 N225_FUTURES_CONTRACT.exchange = "OSE.JPN"
 N225_FUTURES_CONTRACT.currency = "JPY"
 
+MAX_ORDER_NUMBER = 2
+
+# クライアントIDの設定（特に変更は不要）
 CLIENT_ID_EXPIRATIONS = 55
 CLIENT_ID_OHLC_DATA_BASE = 56
 CLIENT_ID_POSITIONS = 99
@@ -36,7 +43,7 @@ CHART_OUTPUT_DIR = "chart_images" # 追加
 OHLC_CONFIGS = [
     ("15 mins", "1 Y", "15M", "15分足"), # チャートタイトル用のサフィックスを追加
     ("4 hours", "5 Y", "4H", "4時間足"),   # チャートタイトル用のサフィックスを追加
-    # ("1 day", "5 Y", "1D", "日足")
+    ("1 day", "5 Y", "1D", "日足")
 ]
 # --- End Global Settings ---
 
@@ -56,7 +63,7 @@ def main():
 
 
         # --- 1. Fetch N225 Futures Expirations ---
-        print(f"\nStep 1: Calling get_n225_futures_expirations (clientId: {CLIENT_ID_EXPIRATIONS})...")
+        print(f"\nStep 1: Calling get_{N225_FUTURES_CONTRACT.symbol}_futures_expirations (clientId: {CLIENT_ID_EXPIRATIONS})...")
         n225_expirations_yyyymmdd = get_n225_futures_expirations(
             base_contract=N225_FUTURES_CONTRACT,
             host=HOST,
@@ -65,7 +72,7 @@ def main():
         )
 
         if not n225_expirations_yyyymmdd:
-            print("Failed to retrieve N225 futures expiration dates. Exiting.")
+            print(f"Failed to retrieve {N225_FUTURES_CONTRACT.symbol} futures expiration dates. Exiting.")
             return
 
 
@@ -75,10 +82,10 @@ def main():
         active_contract_month = determine_active_contract_month(n225_expirations_yyyymmdd, current_date)
 
         if not active_contract_month:
-            print("\nStep 2: Could not determine an active N225 contract month. Exiting.")
+            print(f"\nStep 2: Could not determine an active {N225_FUTURES_CONTRACT.symbol} contract month. Exiting.")
             return
         
-        print(f"\nStep 2: The active N225 contract month to be used is: {active_contract_month}")
+        print(f"\nStep 2: The active {N225_FUTURES_CONTRACT.symbol} contract month to be used is: {active_contract_month}")
 
 
         # --- 3. Update or Create OHLC CSVs for each configuration ---
@@ -87,7 +94,7 @@ def main():
         for bar_size, initial_duration, suffix, chart_title_suffix in OHLC_CONFIGS:
             current_ohlc_client_id = CLIENT_ID_OHLC_DATA_BASE + ohlc_client_id_counter
             
-            csv_filename_only = f"n225_ohlc_{active_contract_month}_{suffix}.csv"
+            csv_filename_only = f"{N225_FUTURES_CONTRACT.symbol}_ohlc_{active_contract_month}_{suffix}.csv"
             csv_output_file = os.path.join(CSV_OUTPUT_DIR, csv_filename_only)
 
             print(f"\nProcessing CSV for contract {active_contract_month}, Bar: {bar_size} (Initial Duration: {initial_duration}) (clientId: {current_ohlc_client_id})...")
@@ -114,61 +121,66 @@ def main():
             time.sleep(5)
 
 
-        # # --- 4. Create Charts from CSVs for each configuration ---
-        # print("\n--- Step 4: Creating Charts from CSVs ---")
-        # generated_chart_paths = []
-        # generated_chart_timeframes = []
-        # for bar_size, initial_duration, suffix, chart_title_suffix in OHLC_CONFIGS:
-        #     csv_filename_only = f"n225_ohlc_{active_contract_month}_{suffix}.csv"
-        #     csv_output_file = os.path.join(CSV_OUTPUT_DIR, csv_filename_only)
+        # --- 4. Create Charts from CSVs for each configuration ---
+        print("\n--- Step 4: Creating Charts from CSVs ---")
+        generated_chart_paths = []
+        generated_chart_timeframes = []
+        for bar_size, initial_duration, suffix, chart_title_suffix in OHLC_CONFIGS:
+            csv_filename_only = f"{N225_FUTURES_CONTRACT.symbol}_ohlc_{active_contract_month}_{suffix}.csv"
+            csv_output_file = os.path.join(CSV_OUTPUT_DIR, csv_filename_only)
 
-        #     if os.path.exists(csv_output_file):
-        #         print(f"\nCreating chart for {csv_output_file}...")
-        #         chart_filename_only = f"n225_chart_{active_contract_month}_{suffix}.jpg"
-        #         chart_output_file = os.path.join(CHART_OUTPUT_DIR, chart_filename_only)
-        #         chart_title = f"日経225先物 {active_contract_month} ({chart_title_suffix})"
+            if os.path.exists(csv_output_file):
+                print(f"\nCreating chart for {csv_output_file}...")
+                chart_filename_only = f"{N225_FUTURES_CONTRACT.symbol}_chart_{active_contract_month}_{suffix}.jpg"
+                chart_output_file = os.path.join(CHART_OUTPUT_DIR, chart_filename_only)
+                chart_title = f"日経225先物 {active_contract_month} ({chart_title_suffix})"
 
-        #         try:
-        #             chart_image_path = create_chart(
-        #                 csv_file=csv_output_file,
-        #                 output_file=chart_output_file,
-        #                 title=chart_title
-        #             )
-        #             print(f"Successfully created chart: {chart_image_path}")
-        #             generated_chart_paths.append(chart_image_path)
-        #             generated_chart_timeframes.append(chart_title_suffix)
-        #         except Exception as e:
-        #             print(f"Error creating chart for {csv_output_file}: {e}")
-        #     else:
-        #         print(f"Skipping chart creation for {csv_output_file} as it does not exist.")
+                try:
+                    chart_image_path = create_chart(
+                        csv_file=csv_output_file,
+                        output_file=chart_output_file,
+                        title=chart_title
+                    )
+                    print(f"Successfully created chart: {chart_image_path}")
+                    generated_chart_paths.append(chart_image_path)
+                    generated_chart_timeframes.append(chart_title_suffix)
+                except Exception as e:
+                    print(f"Error creating chart for {csv_output_file}: {e}")
+            else:
+                print(f"Skipping chart creation for {csv_output_file} as it does not exist.")
 
-        # print("\n--- Main Script Finished ---")
+        print("\n--- Creating Charts Done ---")
 
 
-        # # --- 5. Get and Format Summaries of Top News Articles ---
-        # print("\n--- Step 5: Getting and Formatting Summaries of Top News Articles ---")
+        # --- 5. Get and Format Summaries of Top News Articles ---
+        print("\n--- Step 5: Getting and Formatting Summaries of Top News Articles ---")
         
-        # # 5-1. 関数を呼び出し、要約文のリストを取得
-        # summaries_list = get_and_summarize_top_articles(top_n=5)
+        # 5-1. 関数を呼び出し、要約文のリストを取得
+        news_summaries = get_and_summarize_top_articles(top_n=5)
 
-        # # 5-2. AIに渡すために、取得したリストを整形済みの単一文字列に変換
-        # formatted_summaries_for_ai = ""
-        # if summaries_list:
-        #     # 番号付きリストの各行を作成
-        #     summary_lines = [f"{i}. {summary}" for i, summary in enumerate(summaries_list, 1)]
+        # 5-2. AIに渡すために、取得したリストを整形済みの単一文字列に変換
+        formatted_summaries_for_ai = ""
+        if news_summaries:
+            # 番号付きリストの各行を作成
+            summary_lines = [f"{i}. {summary}" for i, summary in enumerate(news_summaries, 1)]
             
-        #     # ヘッダーと改行コードを使って最終的な文字列を組み立てる
-        #     formatted_summaries_for_ai = "Top 5 News Summaries:\n" + "\n\n".join(summary_lines)
+            # ヘッダーと改行コードを使って最終的な文字列を組み立てる
+            formatted_summaries_for_ai = "Top 5 News Summaries:\n" + "\n\n".join(summary_lines)
             
-        #     print("\n--- Formatted Summaries (for AI Prompt) ---")
-        #     print(formatted_summaries_for_ai)
-        #     print("---------------------------------------------")
-        # else:
-        #     print("\nCould not retrieve any article summaries.")
+            print("\n--- Formatted Summaries (for AI Prompt) ---")
+            print(formatted_summaries_for_ai)
+            print("---------------------------------------------")
+        else:
+            print("\nCould not retrieve any article summaries.")
 
 
-        # --- 6. Display Current Positions vs Latest CSV Price ---
-        print("\n--- Step 6: Getting Current Positions and Comparing with Latest CSV Price ---")
+        # --- 6. Get the Board Inforamation ---
+        board_info_md = get_board_info_markdown()
+        print(f"Board Info: \n{board_info_md}")
+
+
+        # --- 7. Display Current Positions vs Latest CSV Price ---
+        print("\n--- Step 7: Getting Current Positions and Comparing with Latest CSV Price ---")
         current_positions = get_current_positions(
             host=HOST,
             port=PORT,
@@ -182,44 +194,34 @@ def main():
         else:
             print("\n--- Current Open Positions vs Latest Close Price ---")
             # 比較対象のCSVファイルとして、最も粒度の細かい(最初の)設定を使用
-            if OHLC_CONFIGS:
-                first_config_suffix = OHLC_CONFIGS[0][2] # 例: "15M"
-                csv_filename = f"n225_ohlc_{active_contract_month}_{first_config_suffix}.csv"
-                csv_path = os.path.join(CSV_OUTPUT_DIR, csv_filename)
-                
-                latest_close_price = get_last_close_from_csv(csv_path)
-                
-                if latest_close_price is not None:
-                    print(f"(Using latest close price from: {csv_path})")
-                else:
-                    print(f"(Warning: Could not read latest close price from {csv_path})")
+            latest_close_price = print_positions_vs_latest_close(
+                current_positions=current_positions,
+                N225_FUTURES_CONTRACT=N225_FUTURES_CONTRACT,
+                active_contract_month=active_contract_month,
+                OHLC_CONFIGS=OHLC_CONFIGS,
+                CSV_OUTPUT_DIR=CSV_OUTPUT_DIR,
+                get_last_close_from_csv=get_last_close_from_csv
+            )
 
-                for pos in current_positions:
-                    position_qty = pos.get('position', 0)
-                    avg_price = pos.get('avgPrice', 0)
-                    
-                    # ポジションの方向（買い/売り）を判定
-                    side = "Long" if position_qty > 0 else "Short" if position_qty < 0 else "Flat"
+            # 決済判断ロジックを追加
+            print("\n--- Step X: Deciding whether to close positions ---")
+            # 例: 各ポジションの損益や条件を見て決済判断
+            for pos in current_positions:
+                transaction_decision = analyze_close_decision_with_function_calling(
+                    image_paths=generated_chart_paths,
+                    timeframes=generated_chart_timeframes, 
+                    current_position=pos,  # 1つだけ渡す
+                    news_summaries=formatted_summaries_for_ai,
+                    board_info_md=board_info_md,
+                    latest_close_price=latest_close_price
+                )
+                print(f"Decision for {pos['symbol']} ({pos['lastTradeDateOrContractMonth']}): {transaction_decision.get('decision', 'N/A')}")
+                print(f"  Reason: {transaction_decision.get('reason', '')}")
+                print(f"  Confidence: {transaction_decision.get('confidence', '')}")
+                print(f"  Additional Info Needed: {transaction_decision.get('additional_info_needed', '')}")
 
-                    print(f"\n  Account: {pos['account']}")
-                    print(f"    Symbol: {pos['symbol']}, Expiry: {pos['lastTradeDateOrContractMonth']}")
-                    # 数量は絶対値を表示し、Side（方向）を明記する
-                    print(f"    Side: {side}, Quantity: {abs(position_qty)}, Avg Price: {avg_price:.2f}")
-                    
-                    # ポジションが現在処理中の限月と一致する場合のみ価格比較を行う
-                    if latest_close_price is not None and \
-                    pos['symbol'] == N225_FUTURES_CONTRACT.symbol and \
-                    pos['lastTradeDateOrContractMonth'].startswith(active_contract_month[:6]):
-                        
-                        print(f"    Latest CSV Close: {latest_close_price:.2f}")
-                        # 損益計算では元の符号付き数量を使用する
-                        pnl_per_unit = (latest_close_price - avg_price) * position_qty
-                        print(f"    Unrealized P/L (vs latest close): {pnl_per_unit:.2f}")
-                    
-                    print("-" * 20)
-
-        # --- 6.5: Getting Margin Info (AvailableFunds)  ---
-        print("\n--- Step 6.5: Getting Margin Info (AvailableFunds) ---")
+        # --- 7.5: Getting Margin Info (AvailableFunds)  ---
+        print("\n--- Step 7.5: Getting Margin Info (AvailableFunds) ---")
         available_funds = get_account_updates(host=HOST, port=PORT, clientId=1001)
         print(f"AvailableFunds (JPY): {available_funds}")
 
@@ -251,6 +253,18 @@ def main():
         else:
             print("AvailableFundsが取得できませんでした。")
             funds_unavailable = True
+
+
+        # --- 7. Decide weather to transact or order ---
+        print("\n--- Step 7: Deciding whether to transact or order ---")
+        if can_place_order:
+            print("Proceeding with order placement...")
+            # ここで実際の注文処理を行うコードを追加することができます。
+            # 例: place_order() 関数を呼び出すなど
+        elif insufficient_margin:
+            print("Insufficient margin to place an order. Skipping order placement.")
+        elif funds_unavailable:
+            print("Funds information is unavailable. Cannot decide on order placement.")
 
 
         # # --- 7. Analyze Charts with OpenAI ---
