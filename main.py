@@ -14,6 +14,10 @@ from src.funcs.openai_prediction import analyze_chart_with_function_calling
 from src.funcs.openai_transaction import analyze_close_decision_with_function_calling
 from src.funcs.show_margin import get_account_updates
 from src.funcs.get_board_info import get_board_info_markdown
+from src.funcs.chart import create_charts_from_csvs
+from src.funcs.close_position import close_n225_position
+from src.funcs.place_order import place_n225_market_order
+from src.funcs.ohlc import update_ohlc_csvs_for_configs
 
 # --- Global Settings ---
 HOST = "127.0.0.1"
@@ -90,66 +94,27 @@ def main():
 
         # --- 3. Update or Create OHLC CSVs for each configuration ---
         print("\n--- Step 3: Updating/Creating OHLC CSVs ---")
-        ohlc_client_id_counter = 0
-        for bar_size, initial_duration, suffix, chart_title_suffix in OHLC_CONFIGS:
-            current_ohlc_client_id = CLIENT_ID_OHLC_DATA_BASE + ohlc_client_id_counter
-            
-            csv_filename_only = f"{N225_FUTURES_CONTRACT.symbol}_ohlc_{active_contract_month}_{suffix}.csv"
-            csv_output_file = os.path.join(CSV_OUTPUT_DIR, csv_filename_only)
-
-            print(f"\nProcessing CSV for contract {active_contract_month}, Bar: {bar_size} (Initial Duration: {initial_duration}) (clientId: {current_ohlc_client_id})...")
-            print(f"Target CSV file: {csv_output_file}")
-            
-            csv_updated_successfully = update_or_create_ohlc_csv(
-                base_contract_for_ohlc=N225_FUTURES_CONTRACT,
-                contract_month_yyyymm=active_contract_month,
-                host=HOST,
-                port=PORT,
-                client_id=current_ohlc_client_id,
-                bar_size_setting=bar_size,
-                initial_duration_str=initial_duration,
-                output_csv_filename=csv_output_file
-            )
-
-            if csv_updated_successfully:
-                print(f"Successfully updated/created CSV: {csv_output_file}")
-            else:
-                print(f"Failed to update/create CSV: {csv_output_file}")
-            
-            ohlc_client_id_counter += 1
-            print("Waiting for 5 seconds before next IB API operation...")
-            time.sleep(5)
+        update_ohlc_csvs_for_configs(
+            OHLC_CONFIGS=OHLC_CONFIGS,
+            N225_FUTURES_CONTRACT=N225_FUTURES_CONTRACT,
+            active_contract_month=active_contract_month,
+            HOST=HOST,
+            PORT=PORT,
+            CLIENT_ID_OHLC_DATA_BASE=CLIENT_ID_OHLC_DATA_BASE,
+            CSV_OUTPUT_DIR=CSV_OUTPUT_DIR,
+            update_or_create_ohlc_csv_func=update_or_create_ohlc_csv
+        )
 
 
         # --- 4. Create Charts from CSVs for each configuration ---
-        print("\n--- Step 4: Creating Charts from CSVs ---")
-        generated_chart_paths = []
-        generated_chart_timeframes = []
-        for bar_size, initial_duration, suffix, chart_title_suffix in OHLC_CONFIGS:
-            csv_filename_only = f"{N225_FUTURES_CONTRACT.symbol}_ohlc_{active_contract_month}_{suffix}.csv"
-            csv_output_file = os.path.join(CSV_OUTPUT_DIR, csv_filename_only)
-
-            if os.path.exists(csv_output_file):
-                print(f"\nCreating chart for {csv_output_file}...")
-                chart_filename_only = f"{N225_FUTURES_CONTRACT.symbol}_chart_{active_contract_month}_{suffix}.jpg"
-                chart_output_file = os.path.join(CHART_OUTPUT_DIR, chart_filename_only)
-                chart_title = f"日経225先物 {active_contract_month} ({chart_title_suffix})"
-
-                try:
-                    chart_image_path = create_chart(
-                        csv_file=csv_output_file,
-                        output_file=chart_output_file,
-                        title=chart_title
-                    )
-                    print(f"Successfully created chart: {chart_image_path}")
-                    generated_chart_paths.append(chart_image_path)
-                    generated_chart_timeframes.append(chart_title_suffix)
-                except Exception as e:
-                    print(f"Error creating chart for {csv_output_file}: {e}")
-            else:
-                print(f"Skipping chart creation for {csv_output_file} as it does not exist.")
-
-        print("\n--- Creating Charts Done ---")
+        generated_chart_paths, generated_chart_timeframes = create_charts_from_csvs(
+            OHLC_CONFIGS=OHLC_CONFIGS,
+            N225_FUTURES_CONTRACT=N225_FUTURES_CONTRACT,
+            active_contract_month=active_contract_month,
+            CSV_OUTPUT_DIR=CSV_OUTPUT_DIR,
+            CHART_OUTPUT_DIR=CHART_OUTPUT_DIR,
+            create_chart_func=create_chart
+        )
 
 
         # --- 5. Get and Format Summaries of Top News Articles ---
@@ -215,10 +180,24 @@ def main():
                     board_info_md=board_info_md,
                     latest_close_price=latest_close_price
                 )
-                print(f"Decision for {pos['symbol']} ({pos['lastTradeDateOrContractMonth']}): {transaction_decision.get('decision', 'N/A')}")
-                print(f"  Reason: {transaction_decision.get('reason', '')}")
-                print(f"  Confidence: {transaction_decision.get('confidence', '')}")
-                print(f"  Additional Info Needed: {transaction_decision.get('additional_info_needed', '')}")
+                print(f"\n--- OpenAI Close Decision Result for {pos['symbol']} ({pos['lastTradeDateOrContractMonth']}) ---")
+                print(f"  Decision: {transaction_decision.get('decision', 'N/A')}")
+                print(f"  Confidence: {transaction_decision.get('confidence', 'N/A')}")
+                print(f"  Reason: {transaction_decision.get('reason', 'N/A')}")
+                if transaction_decision.get('additional_info_needed'):
+                    print(f"  Additional Info Needed: {', '.join(transaction_decision['additional_info_needed'])}")
+                print("------------------------------")
+
+                # 決済判断
+                if transaction_decision.get('decision') == "決済":
+                    print("→ ポジションを決済します")
+                    result = close_n225_position(
+                        current_position=pos,
+                        expiration_month=pos["lastTradeDateOrContractMonth"][:6]
+                    )
+                    print(f"  Close order result: {result}")
+                else:
+                    print("→ 継続保有（何もしません）")
 
         # --- 7.5: Getting Margin Info (AvailableFunds)  ---
         print("\n--- Step 7.5: Getting Margin Info (AvailableFunds) ---")
@@ -255,40 +234,78 @@ def main():
             funds_unavailable = True
 
 
-        # --- 7. Decide weather to transact or order ---
-        print("\n--- Step 7: Deciding whether to transact or order ---")
+        # --- 8. Decide weather to transact or order ---
+        print("\n--- Step 8: Deciding whether to transact or order ---")
+
+        # 現在の保有枚数を全銘柄合計でカウント
+        total_position_qty = 0
+        if current_positions:
+            for pos in current_positions:
+                total_position_qty += abs(pos.get('position', 0))
+
         if can_place_order:
-            print("Proceeding with order placement...")
-            # ここで実際の注文処理を行うコードを追加することができます。
-            # 例: place_order() 関数を呼び出すなど
+            if total_position_qty >= MAX_ORDER_NUMBER:
+                print(f"Order NOT placed: 現在の保有枚数({total_position_qty})が最大枚数({MAX_ORDER_NUMBER})に達しています。")
+                print("最大保有枚数制限のため、新規注文はスキップされます。")
+            else:
+                print("Proceeding with order placement...")
+                # --- 9. Analyze Charts with OpenAI ---
+                print("\n--- Step 9: Analyzing charts with OpenAI ---")
+                analysis_result = None
+                try:
+                    print("Sending charts to OpenAI for analysis...")
+                    analysis_result = analyze_chart_with_function_calling(
+                        image_paths=generated_chart_paths,
+                        timeframes=generated_chart_timeframes,
+                        news_summaries=formatted_summaries_for_ai,
+                        board_info_md=board_info_md,
+                        latest_close_price=latest_close_price
+                    )
+                    print("\n--- OpenAI Analysis Result ---")
+                    print(f"  Decision: {analysis_result.get('decision', 'N/A')}")
+                    print(f"  Confidence: {analysis_result.get('confidence', 'N/A')}")
+                    print(f"  Reason: {analysis_result.get('reason', 'N/A')}")
+                    if analysis_result.get('additional_info_needed'):
+                        print(f"  Additional Info Needed: {', '.join(analysis_result['additional_info_needed'])}")
+                    print("------------------------------")
+
+                    match analysis_result.get('decision'):
+                        case "買い":
+                            print("→ 成り行き買い注文を実行")
+                            order_result = place_n225_market_order(
+                                action="BUY",
+                                quantity=order_size,  # 1で固定している
+                                expiration_month=active_contract_month,
+                                host=HOST,
+                                port=PORT,
+                                clientId=101  # 他と重複しないIDを指定（例: 101）
+                            )
+                            print(f"  Order result: {order_result}")
+                        case "売り":
+                            print("→ 成り行き売り注文を実行")
+                            order_result = place_n225_market_order(
+                                action="SELL",
+                                quantity=order_size,
+                                expiration_month=active_contract_month,
+                                host=HOST,
+                                port=PORT,
+                                clientId=102  # 他と重複しないIDを指定（例: 102）
+                            )
+                            print(f"  Order result: {order_result}")
+                        case "待ち":
+                            print("→ 今回は見送り（待ち）")
+                        case _:
+                            print("→ 分析エラーまたは判定不能")
+
+                except Exception as e:
+                    print(f"An error occurred during OpenAI analysis: {e}")
         elif insufficient_margin:
             print("Insufficient margin to place an order. Skipping order placement.")
         elif funds_unavailable:
             print("Funds information is unavailable. Cannot decide on order placement.")
 
 
-        # # --- 7. Analyze Charts with OpenAI ---
-        # print("\n--- Step 7: Analyzing charts with OpenAI ---")
-        # analysis_result = None
-        # if generated_chart_paths:
-        #     try:
-        #         print("Sending charts to OpenAI for analysis...")
-        #         analysis_result = analyze_chart_with_function_calling(
-        #             image_paths=generated_chart_paths,
-        #             timeframes=generated_chart_timeframes
-        #         )
-        #         print("\n--- OpenAI Analysis Result ---")
-        #         print(f"  Decision: {analysis_result.get('decision', 'N/A')}")
-        #         print(f"  Confidence: {analysis_result.get('confidence', 'N/A')}")
-        #         print(f"  Reason: {analysis_result.get('reason', 'N/A')}")
-        #         if analysis_result.get('additional_info_needed'):
-        #             print(f"  Additional Info Needed: {', '.join(analysis_result['additional_info_needed'])}")
-        #         print("------------------------------")
 
-        #     except Exception as e:
-        #         print(f"An error occurred during OpenAI analysis: {e}")
-        # else:
-        #     print("No charts were generated, skipping OpenAI analysis.")
 
         # 15分待機して次のループへ
         print("\n--- Waiting 15 minutes before next execution ---")

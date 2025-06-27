@@ -31,8 +31,6 @@ def rank_headlines_with_openai(
         print("No news articles provided to rank.")
         return []
 
-    print("Ranking headlines with OpenAI (Responses API - JSON Mode)...")
-
     # AIに渡すためにニュースリストを整形
     formatted_news = ""
     for i, article in enumerate(news_articles, 1):

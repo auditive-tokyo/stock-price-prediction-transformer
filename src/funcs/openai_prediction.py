@@ -15,17 +15,25 @@ def encode_image_to_base64(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
-def analyze_chart_with_function_calling(image_paths, timeframes):
-    """Function callingを使用して複数のチャート分析を構造化する"""
+def analyze_chart_with_function_calling(
+    image_paths, timeframes, news_summaries, board_info_md, latest_close_price
+):
+    """
+    Function callingを使用して複数のチャート分析を構造化する
+    news_summaries: str または list（AI要約ニュースなど）
+    board_info_md: str（板情報のMarkdownテーブル）
+    latest_close_price: float または str（最新の終値）
+    """
     # メッセージに含めるコンテンツリストを作成
     content = []
-    
-    # TODO: 将来的に板情報を取得してプロンプトに追加する
-    # board_info = "..."
 
     # プロンプト
     prompt = f"""
 これらの画像は、日経225先物の{', '.join(timeframes)}のローソク足チャートです。
+news_summariesには直近の重要ニュース要約が含まれています。
+board_info_mdには最新の板情報がMarkdownテーブル形式で含まれています。
+latest_close_priceは直近の終値（最新価格）です。
+
 これらの情報を総合的に分析し、「買い、売り、待ち」の判断をしてください。
 
 trading_decision関数を使用して判断結果を返してください。
@@ -33,6 +41,18 @@ trading_decision関数を使用して判断結果を返してください。
 より精度が増すような追加情報が必要な場合は、additional_info_neededフィールドにリストアップしてください。
 """
     content.append({"type": "text", "text": prompt})
+
+    # ニュース要約
+    if news_summaries:
+        content.append({"type": "text", "text": f"【直近ニュース要約】\n{news_summaries}"})
+
+    # 板情報
+    if board_info_md:
+        content.append({"type": "text", "text": f"【板情報】\n{board_info_md}"})
+
+    # 最新終値
+    if latest_close_price is not None:
+        content.append({"type": "text", "text": f"【最新終値】\n{latest_close_price}"})
 
     # 各画像をBase64エンコードしてコンテンツに追加
     for path in image_paths:
