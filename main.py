@@ -6,6 +6,7 @@ from src.utils.ib_futures_expirations import get_n225_futures_expirations
 from src.utils.active_contract_month import determine_active_contract_month
 from src.utils.get_last_close_from_csv import get_last_close_from_csv
 from src.utils.print_positions_vs_latest_close import print_positions_vs_latest_close
+from src.utils.save_analysis_to_csv import save_analysis_to_csv
 from src.funcs.get_positions import get_current_positions
 from src.funcs.update_ohlc_data import update_or_create_ohlc_csv
 from src.funcs.create_rosoku import create_chart
@@ -199,6 +200,8 @@ def main():
                 else:
                     print("→ 継続保有（何もしません）")
 
+                save_analysis_to_csv(transaction_decision, situation="決済")
+
         # --- 7.5: Getting Margin Info (AvailableFunds)  ---
         print("\n--- Step 7.5: Getting Margin Info (AvailableFunds) ---")
         available_funds = get_account_updates(host=HOST, port=PORT, clientId=1001)
@@ -234,8 +237,8 @@ def main():
             funds_unavailable = True
 
 
-        # --- 8. Decide weather to transact or order ---
-        print("\n--- Step 8: Deciding whether to transact or order ---")
+        # --- 8. Decide weather to buy, sell, or wait ---
+        print("\n--- Step 8: Deciding whether to buy, sell, or wait ---")
 
         # 現在の保有枚数を全銘柄合計でカウント
         total_position_qty = 0
@@ -296,6 +299,8 @@ def main():
                             print("→ 今回は見送り（待ち）")
                         case _:
                             print("→ 分析エラーまたは判定不能")
+
+                    save_analysis_to_csv(analysis_result, situation="オーダー")
 
                 except Exception as e:
                     print(f"An error occurred during OpenAI analysis: {e}")

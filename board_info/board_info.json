@@ -1,102 +1,102 @@
 [
   {
-    "sell_qty": 23,
-    "price": "40540",
+    "sell_qty": 8,
+    "price": "40690",
     "buy_qty": null
   },
   {
-    "sell_qty": 29,
+    "sell_qty": 8,
+    "price": "40680",
+    "buy_qty": null
+  },
+  {
+    "sell_qty": 9,
+    "price": "40670",
+    "buy_qty": null
+  },
+  {
+    "sell_qty": 8,
+    "price": "40660",
+    "buy_qty": null
+  },
+  {
+    "sell_qty": 8,
+    "price": "40650",
+    "buy_qty": null
+  },
+  {
+    "sell_qty": 7,
+    "price": "40640",
+    "buy_qty": null
+  },
+  {
+    "sell_qty": 7,
+    "price": "40630",
+    "buy_qty": null
+  },
+  {
+    "sell_qty": 5,
+    "price": "40620",
+    "buy_qty": null
+  },
+  {
+    "sell_qty": 3,
+    "price": "40610",
+    "buy_qty": null
+  },
+  {
+    "sell_qty": 2,
+    "price": "40600",
+    "buy_qty": null
+  },
+  {
+    "sell_qty": null,
     "price": "40530",
-    "buy_qty": null
+    "buy_qty": 2
   },
   {
-    "sell_qty": 23,
+    "sell_qty": null,
     "price": "40520",
-    "buy_qty": null
+    "buy_qty": 2
   },
   {
-    "sell_qty": 25,
+    "sell_qty": null,
     "price": "40510",
-    "buy_qty": null
+    "buy_qty": 2
   },
   {
-    "sell_qty": 46,
+    "sell_qty": null,
     "price": "40500",
-    "buy_qty": null
+    "buy_qty": 5
   },
   {
-    "sell_qty": 21,
+    "sell_qty": null,
     "price": "40490",
-    "buy_qty": null
+    "buy_qty": 4
   },
   {
-    "sell_qty": 58,
+    "sell_qty": null,
     "price": "40480",
-    "buy_qty": null
+    "buy_qty": 5
   },
   {
-    "sell_qty": 44,
+    "sell_qty": null,
     "price": "40470",
-    "buy_qty": null
+    "buy_qty": 8
   },
   {
-    "sell_qty": 33,
+    "sell_qty": null,
     "price": "40460",
-    "buy_qty": null
+    "buy_qty": 8
   },
   {
-    "sell_qty": 26,
+    "sell_qty": null,
     "price": "40450",
-    "buy_qty": null
+    "buy_qty": 8
   },
   {
     "sell_qty": null,
     "price": "40440",
-    "buy_qty": 28
-  },
-  {
-    "sell_qty": null,
-    "price": "40430",
-    "buy_qty": 35
-  },
-  {
-    "sell_qty": null,
-    "price": "40420",
-    "buy_qty": 47
-  },
-  {
-    "sell_qty": null,
-    "price": "40410",
-    "buy_qty": 35
-  },
-  {
-    "sell_qty": null,
-    "price": "40400",
-    "buy_qty": 34
-  },
-  {
-    "sell_qty": null,
-    "price": "40390",
-    "buy_qty": 38
-  },
-  {
-    "sell_qty": null,
-    "price": "40380",
-    "buy_qty": 24
-  },
-  {
-    "sell_qty": null,
-    "price": "40370",
-    "buy_qty": 28
-  },
-  {
-    "sell_qty": null,
-    "price": "40360",
-    "buy_qty": 23
-  },
-  {
-    "sell_qty": null,
-    "price": "40350",
-    "buy_qty": 35
+    "buy_qty": 8
   }
 ]

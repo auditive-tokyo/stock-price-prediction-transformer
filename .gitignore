@@ -6,6 +6,7 @@ saved_model*/
 .venv
 
 .DS_Store
+*.pkl
 
 # temp
 tradingbot/
